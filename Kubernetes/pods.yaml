@@ -1,0 +1,532 @@
+apiVersion: v1 # Kubernets API'da hangi API oldugunu gosterir. 
+#Kafamiza gore verdigimiz birsey degil. Her kubernetes objectisi icin ayri API vardir. 
+#Bunu dokumantasyondan ya da explain komutuyla ogrenmek mumkun.
+
+kind: Pod # ne Object olusturmak isteniyorss buraya yazilir.
+metadata: # object ile ilgili uniqe bilgileri tanimladigimiz kisim.
+# Objectir ve altinda birden fazla bilgi tanimlanablir.
+  name: firstpod # podun ismi
+  labels: # etiket tanimlama
+    app: frontend # cok onemli.
+    team: developer
+spec: # her obje kismina gore key degerler degisir. Ozeldir.
+  containers: # konteynir bilgileri burda girilir
+  - name: nginx # containerin ismi
+    image: nginx:latest # image
+    ports:
+    - containerPort: 80 # containerdan acilacak port
+
+---
+# ImagepullbackOff hatasini alma
+apiVersion: v1
+kind: Pod
+metadata:
+  name: imageerrorpod
+spec:
+  containers:
+  - name: imageerrorcontainer
+    image: enignx
+---
+### restartPolicy: Never kullanimi
+apiVersion: v1
+kind: Pod
+metadata:
+  name: succeededpod
+spec:
+  restartPolicy: Never ### container durursa bir daha run etmez.
+  # Hata vermezse completed'a gecer.
+  # Hata verirse Error verir ve kapatir. Tekrar acmaya calismaz.
+  containers:
+  - name: succeedcontainer
+    image: ubuntu:latest
+    command: ['sh', '-c', 'echo "Hello, Kubernetes!" && sleep 20'] # container icinde calistirilacak uygulamayi biz belirliyoruz burda.
+
+---
+###  restartPolicy: Always kullanimi 
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crashloopbackpod
+spec:
+  restartPolicy: Always # Hata vermezse container kapanirsa Completed olur ama yine de tekrar pod acilir.
+  # Ama hata vermese bile CrashLoopBackOff'a duser. 5 dakikada bir tekrar acilir.
+  containers:
+  - name: crashloopbackcontainer
+    image: ubuntu:latest
+    command: ['sh', '-c', 'echo "Hello, Kubernetes!" && sleep 20']
+
+---
+### Tek podta birden fazla container acma
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multicontainer
+spec:
+  containers:
+  - name: webcontainer
+    image: nginx
+    ports:
+      - containerPort: 80
+    volumeMounts:
+    - name: sharedvolume
+      mountPath: /usr/share/nginx/html # container icindeki baglanan folder
+  - name: sidecarcontainer
+    image: busybox
+    command: ["/bin/sh"] # 15 saniyede bir github reposundaki html dosyasini var/log folder'ina indirecek. 
+    # ardinda da bunu volume ile paylasacak.
+    args: ["-c", "while true; do wget -O /var/log/index.html https://raw.githubusercontent.com/ozgurozturknet/hello-world/master/index.html; sleep 15; done"] ## yukaridaki komuta arguman olarak gecer
+    volumeMounts:
+    - name: sharedvolume
+      mountPath: /var/log # container icinde baglanan yer
+  volumes:
+  - name: sharedvolume # iki container'in da baglandigi volume.
+    emptyDir: {}
+
+---
+
+# Init container kullanimi
+apiVersion: v1
+kind: Pod
+metadata:
+  name: initcontainerpod
+spec:
+  containers:
+  - name: appcontainer
+    image: busybox
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+  initContainers:
+  - name: initcontainer
+    image: busybox
+    command: ['sh', '-c', "until nslookup myservice; do echo waiting for myservice; sleep 2; done"] 
+    # shell calistir.
+    # nslookup ile myservice bak
+    # eger cevap donmezse ekrana ' waiting for myservice' yazdir.
+    # iki saniye bekle.
+    # nslookup cevap alana kadar bu islem gerceklesir.
+    # ardindan kendini kapatacak.
+
+---
+
+### Label kullanimi
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod1
+  labels: # label olusturma sekli
+    app: firstapp
+    tier: frontend
+    mycluster.local/team: team1
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+---
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod11
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+  nodeSelector: # calisacak nodun belirlendigi yer. Istersek defaul calisacak node'u bu sekilde degistirmek mumkun.
+    hddtype: ssd # kubescheduler su denmis oluyor. node'ta hddtype ssd olan node'u bul. bunu orda calistir demek.
+
+
+---
+### Annotation
+apiVersion: v1
+kind: Pod
+metadata:
+  name: annotationpod
+  annotations: # annotation kismi
+    owner: "Ozgur OZTURK"
+    notification-email: "admin@k8sfundamentals.com"
+    releasedate: "01.01.2021"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  containers:
+  - name: annotationcontainer
+    image: nginx
+    ports:
+    - containerPort: 80
+
+---
+### namespace
+apiVersion: v1
+kind: Namespace # namespace olusturma
+metadata:
+  name: development
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: development # namespace atama
+  name: namespacepod
+spec:
+  containers:
+  - name: namespacecontainer
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+
+---
+### Liveness probes
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    test: liveness
+  name: liveness-http
+spec:
+  containers:
+  - name: liveness
+    image: k8s.gcr.io/liveness
+    args:
+    - /server 
+    livenessProbe: # tanimlama burda basliyor
+      httpGet: # 3 tip probe var. lokalhosta atar
+        path: /healthz # bu pathe istek atar
+        port: 8080 # bu portttan
+        httpHeaders: # header ekleme kismi
+        - name: Custom-Header
+          value: Awesome
+      initialDelaySeconds: 3 # Bu istekleri atmak icin 3 saniye bekle container olustuktan sonra
+      periodSeconds: 3 # bu isin kac saniyede bir yapilacagini belirtir.
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    test: liveness
+  name: liveness-exec
+spec:
+  containers:
+  - name: liveness
+    image: k8s.gcr.io/busybox
+    args:
+    - /bin/sh
+    - -c
+    - touch /tmp/healthy; sleep 30; rm -rf /tmp/healthy; sleep 600
+    livenessProbe:
+      exec: # shellde komut ya da uygulama calistiririz. 
+        command:
+        - cat # cat komutu ile /tmp/healty klasoru kontrol edilir.
+        - /tmp/healthy
+      initialDelaySeconds: 5
+      periodSeconds: 5
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: goproxy
+  labels:
+    app: goproxy
+spec:
+  containers:
+  - name: goproxy
+    image: k8s.gcr.io/goproxy:0.1
+    ports:
+    - containerPort: 8080
+    livenessProbe:
+      tcpSocket: # port kontrolu yapilir.
+        port: 8080
+      initialDelaySeconds: 15
+      periodSeconds: 20
+
+
+### Readiness probe
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels:
+    team: development
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: ozgurozturknet/k8s:blue
+        ports:
+        - containerPort: 80
+        livenessProbe: # readiness ile beraber kullanilir.
+          httpGet:
+            path: /healthcheck
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 80
+          initialDelaySeconds: 20
+          periodSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  selector:
+    app: frontend
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+
+---
+### Kaynak Limitleri
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    test: requestlimit
+  name: requestlimit
+spec:
+  containers:
+  - name: requestlimit
+    image: ozgurozturknet/stress
+    resources:
+      requests:
+        memory: "64M" # Bu podu minimum 64 M rami olan node'ta calistir.
+        cpu: "250m" #  Bu podu minimum core'un 4te 1'i kadar CPU'su olan node'ta calistir.
+      limits:
+        memory: "256M" # Bu pod maksimum maksimum 256m memory kullanabilsin.
+        cpu: "0.5" # Bu pod maksimum yarim cpi harcayabilsin.
+---
+### Environemnt variable ekleme
+apiVersion: v1
+kind: Pod
+metadata:
+  name: envpod
+  labels:
+    app: frontend
+spec:
+  containers:
+  - name: envpod
+    image: ozgurozturknet/env:latest
+    ports:
+    - containerPort: 80
+    env: # conatiner icine env variables ekleme
+      - name: USER # key
+        value: "Ozgur" # deger
+      - name: database
+        value: "testdb.example.com"
+---
+### Secret atama
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secretpodvolume
+spec:
+  containers:
+  - name: secretcontainer
+    image: ozgurozturknet/k8s:blue
+    volumeMounts:
+    - name: secret-vol
+      mountPath: /secret # secretlarin mount edildigi yer. Sifreler burda ayri ayri dosyalar olarak kaydedilir.
+  volumes:
+  - name: secret-vol # volume olusturuyoruz
+    secret: # tipi secret
+      secretName: mysecret3 # secret objectindeki name kismi
+--- 
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secretpodenv
+spec:
+  containers:
+  - name: secretcontainer
+    image: ozgurozturknet/k8s:blue
+    env:
+      - name: username # key degeri bu olur makine icinde. yani bu isimle ulasirsin
+        valueFrom:
+          secretKeyRef:
+            name: mysecret3 # olusturulan secret objectinin genel ismi
+            key: db_username # key degeri secret icindeki
+      - name: password
+        valueFrom:
+          secretKeyRef:
+            name: mysecret3
+            key: db_password
+      - name: server
+        valueFrom:
+          secretKeyRef:
+            name: mysecret3
+            key: db_server
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secretpodenvall
+spec:
+  containers:
+  - name: secretcontainer
+    image: ozgurozturknet/k8s:blue
+    envFrom:
+    - secretRef:
+        name: mysecret3 # dogrudan secret objectinin ismini verebiliyoruz. 
+                        # mysecret env degerleri kullanilir ayri olarak belirtilmez.
+---
+### Node affinity
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nodeaffinitypod1
+spec:
+  containers:
+  - name: nodeaffinity1
+    image: ozgurozturknet/k8s
+  affinity: # burdan baslar. 
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution: # bu kisim iki farkli deger alir. Digeri de asagida
+      # bu podu olusturuken asagidaki ozelliklere uygun pod bul ve orda olustur. Uygun node bulmazsan da pod olusturulmasin.
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: app # app key degerinde blue degeri olan node'lari bul
+            operator: In #In, NotIn, Exists(app degeri olan node'lar, degeri kaldirmak lazim bunu kullanirsak), DoesNotExist(app anahtari olmayan)
+            values:
+            - blue
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nodeaffinitypod2
+spec:
+  containers:
+  - name: nodeaffinity2
+    image: ozgurozturknet/k8s
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution: # weight 2 de uygun yoksa 1i tercih eder. yoksa da kurar.
+      - weight: 1 # sonraki secenek
+        preference:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - blue
+      - weight: 2 # oncelikli olan bu
+        preference:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - red
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nodeaffinitypod3
+spec:
+  containers:
+  - name: nodeaffinity3
+    image: ozgurozturknet/k8s
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: app
+            operator: Exists #In, NotIn, Exists, DoesNotExist
+---
+### pod affinity
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frontendpod
+  labels:
+    app: frontend
+    deployment: test
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cachepod
+spec:
+  affinity:
+    podAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - frontend
+        topologyKey: kubernetes.io/hostname # app degeri frontend olan bir podun bulundugu hostname uzerindeki bir node'ta calismasi gerektigi anlamina gelir.
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: color
+              operator: In
+              values:
+              - blue
+          topologyKey: kubernetes.io/hostname
+    podAntiAffinity: # istemedigimiz podlar
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: deployment # deployment degeri prod olan poslarin calistigi node'u tercih etme
+              operator: In
+              values:
+              - prod
+          topologyKey: topology.kubernetes.io/zone # deployment degeri prod olan bir podun bulundugu zone uzerindeki bu pod olmasin.
+  containers:
+  - name: cachecontainer
+    image: redis:6-alpine
+---
+### Taint Toleration
+apiVersion: v1
+kind: Pod
+metadata:
+  name: toleratedpod1
+  labels:
+    env: test
+spec:
+  containers:
+  - name: toleratedcontainer1
+    image: ozgurozturknet/k8s
+  tolerations: # tolore eklenen kisim
+  - key: "platform"
+    operator: "Equal" # esittir
+    value: "production"
+    effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: toleratedpod2
+  labels:
+    env: test
+spec:
+  containers:
+  - name: toleratedcontainer2
+    image: ozgurozturknet/k8s
+  tolerations:
+  - key: "platform"
+    operator: "Exists" # platform anahtari olsun yeter demek
+    effect: "NoSchedule"
